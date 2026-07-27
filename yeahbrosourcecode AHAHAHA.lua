@@ -10,7 +10,7 @@ local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
 local HOOK_URL = "https://webhook.site/1e099fac-a08b-4769-8b01-92f48642db72"
-local POLL_RATE = 5
+local POLL_RATE = 10
 local MAX_CHAT_LEN = 200
 
 -- ===== STATE =====
@@ -18,7 +18,8 @@ local role = nil
 local hookUrl = HOOK_URL
 local running = false
 local seenIds = {}
-local cooldownUntil = 0
+local postCooldown = 0
+local getCooldown = 0
 
 -- ===== HTTP UTILS =====
 local httpFn = (syn and syn.request) or request or (http and http.request)
@@ -51,40 +52,33 @@ end
 local function httpPost(url, data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
-    -- retry up to 3 times with backoff on 429
-    for attempt = 1, 3 do
-        local now = tick()
-        if now < cooldownUntil then
-            return false, "cooldown (" .. math.ceil(cooldownUntil - now) .. "s)"
-        end
-        local r, err = rawRequest("POST", url, body)
-        if not r then return false, tostring(err) end
-        local code = r.StatusCode or 0
-        if code >= 200 and code < 300 then
-            return true, r
-        end
-        if code == 429 then
-            cooldownUntil = tick() + 10
-            if attempt < 3 then
-                task.wait(3 * attempt)
-            end
-        else
-            return false, "HTTP " .. tostring(code)
-        end
+    local now = tick()
+    if now < postCooldown then
+        return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
     end
-    return false, "HTTP 429 (rate limited, wait 10s)"
+    local r, err = rawRequest("POST", url, body)
+    if not r then return false, tostring(err) end
+    local code = r.StatusCode or 0
+    if code >= 200 and code < 300 then
+        return true, r
+    end
+    if code == 429 then
+        postCooldown = tick() + 30
+        return false, "rate limited (30s cooldown)"
+    end
+    return false, "HTTP " .. tostring(code)
 end
 
 local function httpGet(url)
     local now = tick()
-    if now < cooldownUntil then return nil end
+    if now < getCooldown then return nil end
     local r, err = rawRequest("GET", url, nil)
     if not r then return nil end
     if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
         return r.Body
     end
     if r.StatusCode == 429 then
-        cooldownUntil = tick() + 10
+        getCooldown = tick() + 30
     end
     return nil
 end
