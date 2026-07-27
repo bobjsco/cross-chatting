@@ -9,12 +9,13 @@ local HttpService = game:GetService("HttpService")
 local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
+local HOOK_URL = "https://webhook.site/1e099fac-a08b-4769-8b01-92f48642db72"
 local POLL_RATE = 0.5
 local MAX_CHAT_LEN = 200
 
 -- ===== STATE =====
 local role = nil
-local hookUrl = ""
+local hookUrl = HOOK_URL
 local running = false
 local lastId = 0
 
@@ -45,17 +46,14 @@ end
 
 -- ===== CHAT: SAY IN GAME =====
 local function sayChat(text)
-    -- Truncate to chat limit
     if #text > MAX_CHAT_LEN then
         text = text:sub(1, MAX_CHAT_LEN - 3) .. "..."
     end
-    -- Old chat system
     local ce = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
     if ce and ce:FindFirstChild("SayMessageRequest") then
         ce.SayMessageRequest:FireServer(text, "All")
         return true
     end
-    -- Fallback: Chat service (bubble + log)
     local head = plr.Character and plr.Character:FindFirstChild("Head")
     if head then
         game:GetService("Chat"):Chat(head, text)
@@ -105,14 +103,13 @@ local C_VDIM = Color3.fromRGB(80, 85, 100)
 -- ========================================
 
 local setup = mk("Frame", {
-    Size = UDim2.new(0, 330, 0, 300),
-    Position = UDim2.new(0.5, -165, 0.5, -150),
+    Size = UDim2.new(0, 330, 0, 260),
+    Position = UDim2.new(0.5, -165, 0.5, -130),
     BackgroundColor3 = C_BG, BorderSizePixel = 0,
     Active = true, Draggable = true
 }, gui)
 crnr(setup); strk(setup, C_ORANGE)
 
--- Title
 mk("TextLabel", {
     Size = UDim2.new(1, 0, 0, 32), Position = UDim2.new(0, 0, 0, 10),
     BackgroundTransparency = 1, Text = "CROSS CONNECT",
@@ -120,7 +117,6 @@ mk("TextLabel", {
     TextSize = 16, Parent = setup
 })
 
--- Subtitle
 mk("TextLabel", {
     Size = UDim2.new(1, 0, 0, 16), Position = UDim2.new(0, 0, 0, 42),
     BackgroundTransparency = 1, Text = "Select your role",
@@ -141,7 +137,6 @@ local function makeRoleBtn(name, xPos)
     })
     crnr(btn, 6); strk(btn, C_VDIM, 1)
     roleBtns[name] = btn
-
     btn.MouseButton1Click:Connect(function()
         selectedRole = name
         for n, b in pairs(roleBtns) do
@@ -154,32 +149,11 @@ end
 
 makeRoleBtn("MESSAGER", 14)
 makeRoleBtn("SENDER", 171)
-
--- Fix sender button to right-align
 roleBtns["SENDER"].Position = UDim2.new(1, -159, 0, 68)
-
--- Webhook label
-mk("TextLabel", {
-    Size = UDim2.new(1, -24, 0, 14), Position = UDim2.new(0, 12, 0, 118),
-    BackgroundTransparency = 1, Text = "WEBHOOK URL (from webhook.site)",
-    TextColor3 = C_DIM, Font = Enum.Font.GothamBold,
-    TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left, Parent = setup
-})
-
--- URL input
-local urlBox = mk("TextBox", {
-    Size = UDim2.new(1, -24, 0, 28), Position = UDim2.new(0, 12, 0, 135),
-    BackgroundColor3 = C_INPUT, Text = "",
-    PlaceholderText = "https://webhook.site/your-token",
-    PlaceholderColor3 = C_VDIM,
-    TextColor3 = C_TEXT, Font = Enum.Font.Gotham,
-    TextSize = 11, ClearTextOnFocus = false, Parent = setup
-})
-crnr(urlBox, 5)
 
 -- Status
 local statusLbl = mk("TextLabel", {
-    Size = UDim2.new(1, -24, 0, 16), Position = UDim2.new(0, 12, 0, 172),
+    Size = UDim2.new(1, -24, 0, 16), Position = UDim2.new(0, 12, 0, 118),
     BackgroundTransparency = 1, Text = "",
     TextColor3 = C_RED, Font = Enum.Font.Gotham,
     TextSize = 10, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
@@ -187,39 +161,30 @@ local statusLbl = mk("TextLabel", {
 
 -- Connect button
 local btnConn = mk("TextButton", {
-    Size = UDim2.new(1, -24, 0, 36), Position = UDim2.new(0, 12, 0, 196),
+    Size = UDim2.new(1, -24, 0, 36), Position = UDim2.new(0, 12, 0, 145),
     BackgroundColor3 = C_INPUT, Text = "CONNECT",
     TextColor3 = C_GREEN, Font = Enum.Font.GothamBold,
     TextSize = 12, AutoButtonColor = false, Parent = setup
 })
 crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 
--- Help text
+-- Webhook display
 mk("TextLabel", {
-    Size = UDim2.new(1, -24, 0, 44), Position = UDim2.new(0, 12, 0, 244),
+    Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "1. Go to webhook.site in your browser\n2. Copy your unique URL\n3. Share it with the other person",
+    Text = "Webhook: 1e099fac...db72 (built-in)",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
 
--- ========================================
--- CONNECT HANDLER
--- ========================================
-
+-- Connect handler
 btnConn.MouseButton1Click:Connect(function()
     if not selectedRole then
         statusLbl.Text = "Select a role first!"
         statusLbl.TextColor3 = C_RED
         return
     end
-    local url = urlBox.Text:match("^https?://%S+")
-    if not url then
-        statusLbl.Text = "Enter a valid webhook URL!"
-        statusLbl.TextColor3 = C_RED
-        return
-    end
-    hookUrl = url
+    hookUrl = HOOK_URL
     role = selectedRole
     setup.Visible = false
     if role == "MESSAGER" then
@@ -242,7 +207,6 @@ local function initMessager()
     }, gui)
     crnr(main); strk(main, C_ORANGE)
 
-    -- Title bar
     mk("Frame", {
         Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = C_DARK,
         BorderSizePixel = 0, Parent = main
@@ -254,27 +218,18 @@ local function initMessager()
         TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Parent = main
     })
 
-    -- Chat log
     local chatLog = mk("ScrollingFrame", {
         Size = UDim2.new(1, -10, 1, -70), Position = UDim2.new(0, 5, 0, 33),
         BackgroundColor3 = C_LOG, BorderSizePixel = 0,
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = C_VDIM,
+        ScrollBarThickness = 4, ScrollBarImageColor3 = C_VDIM,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        Parent = main
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = main
     })
     crnr(chatLog, 4)
-    mk("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 3), Parent = chatLog
-    })
+    mk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3), Parent = chatLog})
     mk("UIPadding", {
-        PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8),
-        PaddingTop = UDim.new(0, 6),
-        PaddingBottom = UDim.new(0, 6),
-        Parent = chatLog
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = chatLog
     })
 
     local logOrder = 0
@@ -283,20 +238,16 @@ local function initMessager()
             Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
             Text = text, TextColor3 = color or C_TEXT,
             Font = Enum.Font.Gotham, TextSize = 11,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
             LayoutOrder = logOrder, Parent = chatLog
         })
         logOrder = logOrder + 1
-        task.defer(function()
-            chatLog.CanvasPosition = Vector2.new(0, 99999)
-        end)
+        task.defer(function() chatLog.CanvasPosition = Vector2.new(0, 99999) end)
     end
 
     addMsg("[System] Connected as Messager", C_GREEN)
     addMsg("[System] Type a message below", C_DIM)
 
-    -- Input bar
     local inputBox = mk("TextBox", {
         Size = UDim2.new(1, -60, 0, 28), Position = UDim2.new(0, 5, 1, -33),
         BackgroundColor3 = C_INPUT, Text = "",
@@ -315,30 +266,21 @@ local function initMessager()
     })
     crnr(sendBtn, 5)
 
-    -- Send logic
     local function send()
         local text = inputBox.Text:match("^%s*(.-)%s*$")
         if not text or #text == 0 then return end
         inputBox.Text = ""
-
         addMsg("You: " .. text, C_TEXT)
-
         local ok, err = httpPost(hookUrl, {
-            t = "cc",
-            n = plr.DisplayName,
-            m = text,
-            ts = tick()
+            t = "cc", n = plr.DisplayName, m = text, ts = tick()
         })
-
         if not ok then
             addMsg("[Error] Send failed: " .. tostring(err), C_RED)
         end
     end
 
     sendBtn.MouseButton1Click:Connect(send)
-    inputBox.FocusLost:Connect(function(enter)
-        if enter then send() end
-    end)
+    inputBox.FocusLost:Connect(function(enter) if enter then send() end end)
 end
 
 -- ========================================
@@ -354,7 +296,6 @@ local function initSender()
     }, gui)
     crnr(main); strk(main, C_ORANGE)
 
-    -- Title bar
     mk("Frame", {
         Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = C_DARK,
         BorderSizePixel = 0, Parent = main
@@ -366,7 +307,6 @@ local function initSender()
         TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Parent = main
     })
 
-    -- Status
     local statusLabel = mk("TextLabel", {
         Size = UDim2.new(1, -10, 0, 18), Position = UDim2.new(0, 5, 0, 33),
         BackgroundTransparency = 1, Text = "Listening for messages...",
@@ -374,27 +314,18 @@ local function initSender()
         TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, Parent = main
     })
 
-    -- Message log
     local msgLog = mk("ScrollingFrame", {
         Size = UDim2.new(1, -10, 1, -58), Position = UDim2.new(0, 5, 0, 55),
         BackgroundColor3 = C_LOG, BorderSizePixel = 0,
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = C_VDIM,
+        ScrollBarThickness = 4, ScrollBarImageColor3 = C_VDIM,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        Parent = main
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = main
     })
     crnr(msgLog, 4)
-    mk("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 3), Parent = msgLog
-    })
+    mk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 3), Parent = msgLog})
     mk("UIPadding", {
-        PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8),
-        PaddingTop = UDim.new(0, 6),
-        PaddingBottom = UDim.new(0, 6),
-        Parent = msgLog
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = msgLog
     })
 
     local logOrder = 0
@@ -403,38 +334,28 @@ local function initSender()
             Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1,
             Text = text, TextColor3 = color or C_TEXT,
             Font = Enum.Font.Gotham, TextSize = 11,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
             LayoutOrder = logOrder, Parent = msgLog
         })
         logOrder = logOrder + 1
-        task.defer(function()
-            msgLog.CanvasPosition = Vector2.new(0, 99999)
-        end)
+        task.defer(function() msgLog.CanvasPosition = Vector2.new(0, 99999) end)
     end
 
     addMsg("[System] Connected as Sender", C_GREEN)
     addMsg("[System] Waiting for messages...", C_DIM)
 
-    -- Poll loop
     running = true
-
     task.spawn(function()
         while running do
             task.wait(POLL_RATE)
-
             local response = httpGet(hookUrl)
             if not response then continue end
-
             local data = jDecode(response)
             if not data or type(data.data) ~= "table" then continue end
-
-            -- Sort entries by id ascending
             local entries = data.data
             table.sort(entries, function(a, b)
                 return (type(a.id) == "number" and a.id or 0) < (type(b.id) == "number" and b.id or 0)
             end)
-
             for _, entry in ipairs(entries) do
                 local eid = type(entry.id) == "number" and entry.id or 0
                 if eid > lastId and entry.content then
@@ -443,10 +364,7 @@ local function initSender()
                         lastId = eid
                         local fromName = msgData.n or "Unknown"
                         local message = msgData.m
-
                         addMsg(fromName .. ": " .. message, C_TEXT)
-
-                        -- Say in game chat
                         local chatMsg = fromName .. " said: " .. message
                         local ok = sayChat(chatMsg)
                         if ok then
@@ -454,7 +372,6 @@ local function initSender()
                         else
                             addMsg("[Error] Could not say in chat", C_RED)
                         end
-
                         statusLabel.Text = "Last: " .. fromName .. " (" .. os.date("%H:%M:%S") .. ")"
                     end
                 end
