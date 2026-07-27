@@ -177,22 +177,7 @@ mk("TextLabel", {
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
 
--- Connect handler
-btnConn.MouseButton1Click:Connect(function()
-    if not selectedRole then
-        statusLbl.Text = "Select a role first!"
-        statusLbl.TextColor3 = C_RED
-        return
-    end
-    hookUrl = HOOK_URL
-    role = selectedRole
-    setup.Visible = false
-    if role == "MESSAGER" then
-        initMessager()
-    else
-        initSender()
-    end
-end)
+-- Connect handler (defined after init functions to avoid nil error)
 
 -- ========================================
 -- MESSAGER GUI
@@ -379,3 +364,23 @@ local function initSender()
         end
     end)
 end
+
+-- ========================================
+-- CONNECT HANDLER (after function defs)
+-- ========================================
+
+btnConn.MouseButton1Click:Connect(function()
+    if not selectedRole then
+        statusLbl.Text = "Select a role first!"
+        statusLbl.TextColor3 = C_RED
+        return
+    end
+    hookUrl = HOOK_URL
+    role = selectedRole
+    setup.Visible = false
+    if role == "MESSAGER" then
+        initMessager()
+    else
+        initSender()
+    end
+end)
