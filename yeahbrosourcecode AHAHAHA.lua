@@ -1,5 +1,5 @@
 -- Cross Connect Chat
--- Messager <-> Sender via HTTP relay (webhooksite.net)
+-- Messager <-> Sender via HTTP relay (hook0.com)
 -- Messager types -> webhook -> Sender says in chat
 -- Sender sees server chat -> webhook -> Messager sees it in log
 
@@ -12,9 +12,9 @@ local plr = Players.LocalPlayer
 
 -- [[[  CONFIG - EDIT THESE  ]]]
 -- 
--- >> Which webhook index to POST your messages to (1-6)
+-- >> Which webhook index to POST your messages to (1-#HOOK_URLS)
 --    Set to 0 to post to ALL webhooks (slower but guaranteed)
-local POST_TO_INDEX = 2
+local POST_TO_INDEX = 1
 --
 -- >> Seconds between each poll cycle
 local POLL_RATE = 15
@@ -24,12 +24,7 @@ local MAX_CHAT_LEN = 200
 --
 -- >> Your webhook URLs (add/remove as needed)
 local HOOK_URLS = {
-    "https://webhooksite.net/d77052fe-7174-45c9-a38f-5eee5335de78",
-    "https://webhooksite.net/de51eeda-2767-4a70-aa60-5f8b0ba1f0f8",
-    "https://webhooksite.net/0b38ca68-4c02-42da-9f0a-e3503014d854",
-    "https://webhooksite.net/1ff3ea11-1718-47dc-ba92-56e0a3dbb448",
-    "https://webhooksite.net/dbfc4771-a107-4337-a426-88ead62c8c1e",
-    "https://webhooksite.net/c526ec75-c83b-4527-bd6c-12b4006b4d4e",
+    "https://play.hook0.com/in/c_yFc0glURXVlRklEq7o9496hhrjL/",
 }
 -- [[[  END CONFIG  ]]]
 
@@ -250,10 +245,17 @@ end
 
 -- ===== PARSE WEBHOOK RESPONSE (flexible) =====
 local function parseEntries(data)
+    -- hook0 / webhooksite / discord-style / bare array
     if type(data.data) == "table" then return data.data end
     if type(data.messages) == "table" then return data.messages end
     if type(data.results) == "table" then return data.results end
+    if type(data.entries) == "table" then return data.entries end
+    if type(data.items) == "table" then return data.items end
     if type(data) == "table" and type(data[1]) == "table" then return data end
+    -- single entry wrapped (not an array)
+    if type(data) == "table" and (data.id or data.content or data.body) then
+        return { data }
+    end
     return nil
 end
 -- ===== GUI HELPERS =====
@@ -366,7 +368,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "6 webhooks loaded (auto-rotate)",
+    Text = "Hook0 webhook loaded",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
@@ -474,35 +476,47 @@ local function initMessager()
 
     -- ===== POLL: receive cc messages + chat relay from Sender =====
     running = true
-    local firstPoll = true
+    local pollCount = 0
     task.spawn(function()
         while running do
             task.wait(POLL_RATE)
+            pollCount = pollCount + 1
+            local debugMode = (pollCount <= 3)
             -- poll all URLs, collect entries
             for i = 1, #HOOK_URLS do
                 local response = httpGetOne(i)
-                if not response then continue end
-                local data = jDecode(response)
-                if not data then
-                    if firstPoll and i == 1 then
-                        addMsg("[Debug] raw: " .. tostring(response):sub(1, 80), C_VDIM)
+                if not response then
+                    if debugMode then
+                        addMsg("[Debug] url" .. i .. ": no response (cooldown?)", C_VDIM)
                     end
                     continue
+                end
+                local data = jDecode(response)
+                if not data then
+                    if debugMode then
+                        addMsg("[Debug] url" ..i .. " raw: " .. tostring(response):sub(1, 120), C_VDIM)
+                    end
+                    continue
+                end
+                if debugMode then
+                    local keys = {}
+                    for k, v in pairs(data) do
+                        table.insert(keys, tostring(k) .. "=" .. type(v))
+                    end
+                    addMsg("[Debug] url" ..i .. " keys: " .. table.concat(keys, ", "), C_VDIM)
                 end
                 local entries = parseEntries(data)
                 if not entries then
-                    if firstPoll and i == 1 then
-                        local keys = {}
-                        for k, v in pairs(data) do
-                            table.insert(keys, tostring(k) .. "=" .. type(v))
-                        end
-                        addMsg("[Debug] keys: " .. table.concat(keys, ", "), C_VDIM)
+                    if debugMode then
+                        addMsg("[Debug] url" ..i .. " parseEntries returned nil", C_VDIM)
                     end
                     continue
                 end
+                if debugMode then
+                    addMsg("[Debug] url" ..i .. " found " .. #entries .. " entries", C_VDIM)
+                end
                 processEntries(entries, addMsg, false, false, true)
             end
-            firstPoll = false
         end
     end)
 end
@@ -585,37 +599,49 @@ local function initSender()
 
     -- ===== POLL: receive cc messages from Messager =====
     running = true
-    local firstPoll = true
+    local pollCount = 0
     task.spawn(function()
         while running do
             task.wait(POLL_RATE)
+            pollCount = pollCount + 1
+            local debugMode = (pollCount <= 3)
             for i = 1, #HOOK_URLS do
                 local response = httpGetOne(i)
-                if not response then continue end
-                local data = jDecode(response)
-                if not data then
-                    if firstPoll and i == 1 then
-                        addMsg("[Debug] raw: " .. tostring(response):sub(1, 80), C_VDIM)
+                if not response then
+                    if debugMode then
+                        addMsg("[Debug] url" .. i .. ": no response (cooldown?)", C_VDIM)
                     end
                     continue
                 end
-                local entries = parseEntries(data)
-                if not entries then
-                    if firstPoll and i == 1 then
-                        local keys = {}
-                        for k, v in pairs(data) do
-                            table.insert(keys, tostring(k) .. "=" .. type(v))
-                        end
-                        addMsg("[Debug] keys: " .. table.concat(keys, ", "), C_VDIM)
+                local data = jDecode(response)
+                if not data then
+                    if debugMode then
+                        addMsg("[Debug] url" ..i .. " raw: " .. tostring(response):sub(1, 120), C_VDIM)
                     end
                     continue
+                end
+                if debugMode then
+                    local keys = {}
+                    for k, v in pairs(data) do
+                        table.insert(keys, tostring(k) .. "=" .. type(v))
+                    end
+                    addMsg("[Debug] url" ..i .. " keys: " .. table.concat(keys, ", "), C_VDIM)
+                end
+                local entries = parseEntries(data)
+                if not entries then
+                    if debugMode then
+                        addMsg("[Debug] url" ..i .. " parseEntries returned nil", C_VDIM)
+                    end
+                    continue
+                end
+                if debugMode then
+                    addMsg("[Debug] url" ..i .. " found " .. #entries .. " entries", C_VDIM)
                 end
                 local lastFrom = processEntries(entries, addMsg, true, true, false)
                 if lastFrom then
                     statusLabel.Text = "Last: " .. lastFrom .. " (" .. os.date("%H:%M:%S") .. ")"
                 end
             end
-            firstPoll = false
         end
     end)
 end
