@@ -10,7 +10,7 @@ local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
 local HOOK_URL = "https://webhook.site/1e099fac-a08b-4769-8b01-92f48642db72"
-local POLL_RATE = 3
+local POLL_RATE = 5
 local MAX_CHAT_LEN = 200
 
 -- ===== STATE =====
@@ -18,31 +18,10 @@ local role = nil
 local hookUrl = HOOK_URL
 local running = false
 local seenIds = {}
+local cooldownUntil = 0
 
 -- ===== HTTP UTILS =====
--- Use executor-compatible HTTP (syn.request / request / http.request)
--- Falls back to HttpService only if none available
-
 local httpFn = (syn and syn.request) or request or (http and http.request)
-local httpLower = not httpFn and false -- some executors use lowercase keys
-
--- Detect which key style the executor wants
-local function detectHttpStyle()
-    if not httpFn then return nil end
-    local ok, r = pcall(httpFn, {
-        Url = "https://httpbin.org/get",
-        Method = "GET"
-    })
-    if ok and r and r.StatusCode then return "Pascal" end
-    -- retry with lowercase
-    ok, r = pcall(httpFn, {
-        url = "https://httpbin.org/get",
-        method = "GET"
-    })
-    if ok and r and r.StatusCode then return "camel" end
-    return "Pascal" -- default guess
-end
-local httpStyle = "Pascal" -- skip auto-detect to avoid extra requests
 
 local function jEncode(t)
     local ok, r = pcall(HttpService.JSONEncode, HttpService, t)
@@ -54,61 +33,60 @@ local function jDecode(s)
     return ok and r or nil
 end
 
+local function rawRequest(method, url, body)
+    if not httpFn then return nil end
+    local req = {
+        Url = url, Method = method,
+        Headers = {},
+    }
+    if body then
+        req.Body = body
+        req.Headers["Content-Type"] = "application/json"
+    end
+    local ok, r = pcall(httpFn, req)
+    if not ok then return nil, r end
+    return r
+end
+
 local function httpPost(url, data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
-    if httpFn then
-        local req
-        if httpStyle == "camel" then
-            req = {
-                url = url, method = "POST",
-                headers = { ["Content-Type"] = "application/json" },
-                body = body
-            }
-        else
-            req = {
-                Url = url, Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = body
-            }
+    -- retry up to 3 times with backoff on 429
+    for attempt = 1, 3 do
+        local now = tick()
+        if now < cooldownUntil then
+            return false, "cooldown (" .. math.ceil(cooldownUntil - now) .. "s)"
         end
-        local ok, r = pcall(httpFn, req)
-        if ok then
-            local code = r and r.StatusCode or 0
-            if code >= 200 and code < 300 then
-                return true, r
-            else
-                return false, "HTTP " .. tostring(code)
+        local r, err = rawRequest("POST", url, body)
+        if not r then return false, tostring(err) end
+        local code = r.StatusCode or 0
+        if code >= 200 and code < 300 then
+            return true, r
+        end
+        if code == 429 then
+            cooldownUntil = tick() + 10
+            if attempt < 3 then
+                task.wait(3 * attempt)
             end
+        else
+            return false, "HTTP " .. tostring(code)
         end
-        return false, tostring(r)
     end
-    -- fallback
-    local ok, r = pcall(function()
-        return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
-    end)
-    return ok, r
+    return false, "HTTP 429 (rate limited, wait 10s)"
 end
 
 local function httpGet(url)
-    if httpFn then
-        local req
-        if httpStyle == "camel" then
-            req = { url = url, method = "GET" }
-        else
-            req = { Url = url, Method = "GET" }
-        end
-        local ok, r = pcall(httpFn, req)
-        if ok and r and r.Body then
-            local code = r.StatusCode or 0
-            if code >= 200 and code < 300 then
-                return r.Body
-            end
-        end
-        return nil
+    local now = tick()
+    if now < cooldownUntil then return nil end
+    local r, err = rawRequest("GET", url, nil)
+    if not r then return nil end
+    if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
+        return r.Body
     end
-    local ok, r = pcall(HttpService.GetAsync, HttpService, url)
-    return ok and r or nil
+    if r.StatusCode == 429 then
+        cooldownUntil = tick() + 10
+    end
+    return nil
 end
 
 -- ===== CHAT: SAY IN GAME =====
