@@ -6,6 +6,7 @@ repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local TextChatService = game:GetService("TextChatService")
 local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
@@ -310,23 +311,37 @@ local function initMessager()
     inputBox.FocusLost:Connect(function(enter) if enter then send() end end)
 
     -- ===== CHAT LOGGER: show server messages in messager log =====
-    local chatEvents = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-    if chatEvents then
-        local onNewMsg = chatEvents:FindFirstChild("OnNewMessage")
-        if onNewMsg then
-            onNewMsg.OnClientEvent:Connect(function(msgData)
+    local chatOk = false
+    local ok, err = pcall(function()
+        TextChatService.MessageReceived:Connect(function(msg)
+            local player = Players:GetPlayerByUserId(msg.TextSource.UserId)
+            if player then
+                local from = player.DisplayName or player.Name
+                local text = msg.Text or ""
+                if text ~= "" then
+                    addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
+                end
+            end
+        end)
+        chatOk = true
+    end)
+    if chatOk then
+        addMsg("[System] Chat logger active", C_GREEN)
+    else
+        -- fallback to legacy chat
+        local chatEvents = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents and chatEvents:FindFirstChild("OnNewMessage") then
+            chatEvents.OnNewMessage.OnClientEvent:Connect(function(msgData)
                 local from = msgData.FromSpeaker or msgData.FromDisplayName or "???"
                 local text = msgData.Message or ""
                 if text ~= "" then
                     addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
                 end
             end)
-            addMsg("[System] Chat logger active", C_GREEN)
+            addMsg("[System] Chat logger active (legacy)", C_GREEN)
         else
-            addMsg("[System] Could not find OnNewMessage", C_RED)
+            addMsg("[System] Could not hook chat", C_RED)
         end
-    else
-        addMsg("[System] Could not find chat events", C_RED)
     end
 end
 
@@ -391,6 +406,37 @@ local function initSender()
 
     addMsg("[System] Connected as Sender", C_GREEN)
     addMsg("[System] Waiting for messages...", C_DIM)
+
+    -- ===== CHAT LOGGER on Sender too =====
+    local chatOk = false
+    local ok2, err2 = pcall(function()
+        TextChatService.MessageReceived:Connect(function(msg)
+            local player = Players:GetPlayerByUserId(msg.TextSource.UserId)
+            if player then
+                local from = player.DisplayName or player.Name
+                local text = msg.Text or ""
+                if text ~= "" then
+                    addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
+                end
+            end
+        end)
+        chatOk = true
+    end)
+    if chatOk then
+        addMsg("[System] Chat logger active", C_GREEN)
+    else
+        local chatEvents = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents and chatEvents:FindFirstChild("OnNewMessage") then
+            chatEvents.OnNewMessage.OnClientEvent:Connect(function(msgData)
+                local from = msgData.FromSpeaker or msgData.FromDisplayName or "???"
+                local text = msgData.Message or ""
+                if text ~= "" then
+                    addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
+                end
+            end)
+            addMsg("[System] Chat logger active (legacy)", C_GREEN)
+        end
+    end
 
     local firstPoll = true
     running = true
