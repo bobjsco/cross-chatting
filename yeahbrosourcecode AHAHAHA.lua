@@ -24,7 +24,7 @@ local MAX_CHAT_LEN = 200
 --
 -- >> Your webhook URLs (add/remove as needed)
 local HOOK_URLS = {
-    "https://webhooksite.net/b6f17c89-b0b1-49de-9e94-c34dccc0f4aa",
+    "https://webhooksite.net/d77052fe-7174-45c9-a38f-5eee5335de78",
     "https://webhooksite.net/de51eeda-2767-4a70-aa60-5f8b0ba1f0f8",
     "https://webhooksite.net/0b38ca68-4c02-42da-9f0a-e3503014d854",
     "https://webhooksite.net/1ff3ea11-1718-47dc-ba92-56e0a3dbb448",
