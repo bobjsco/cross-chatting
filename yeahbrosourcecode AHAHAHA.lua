@@ -1,7 +1,7 @@
 -- Cross Connect Chat
--- Messager <-> Sender via HTTP relay (hook0.com)
--- Messager types -> webhook -> Sender says in chat
--- Sender sees server chat -> webhook -> Messager sees it in log
+-- Messager <-> Sender via webhook.site
+-- Messager types -> webhook POST -> Sender GETs -> says in chat
+-- Sender sees server chat -> webhook POST -> Messager GETs -> shows in log
 
 repeat task.wait() until game:IsLoaded()
 
@@ -12,33 +12,28 @@ local plr = Players.LocalPlayer
 
 -- [[[  CONFIG - EDIT THESE  ]]]
 -- 
--- >> Which webhook index to POST your messages to (1-#HOOK_URLS)
---    Set to 0 to post to ALL webhooks (slower but guaranteed)
-local POST_TO_INDEX = 1
---
 -- >> Seconds between each poll cycle
-local POLL_RATE = 15
+local POLL_RATE = 10
 --
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Your webhook URLs (add/remove as needed)
-local HOOK_URLS = {
-    "https://play.hook0.com/in/c_yFc0glURXVlRklEq7o9496hhrjL/",
-}
+-- >> Webhook token (the UUID from webhook.site)
+--    POST:  https://webhook.site/{TOKEN}
+--    GET:   https://webhook.site/token/{TOKEN}/requests?sorting=newest
+local HOOK_TOKEN = "cfce6b75-d231-4992-a569-ede9edcc3929"
 -- [[[  END CONFIG  ]]]
+
+-- Derived URLs
+local POST_URL = "https://webhook.site/" .. HOOK_TOKEN
+local GET_URL  = "https://webhook.site/token/" .. HOOK_TOKEN .. "/requests?sorting=newest"
 
 -- ===== STATE =====
 local role = nil
 local running = false
 local seenIds = {}
-local postCooldowns = {}  -- per-URL cooldowns
-local getCooldowns = {}
-for i = 1, #HOOK_URLS do
-    postCooldowns[i] = 0
-    getCooldowns[i] = 0
-end
-local postRRIndex = 1  -- round-robin for chat relay posts
+local postCooldown = 0
+local getCooldown = 0
 
 -- ===== HTTP UTILS =====
 local httpFn = (syn and syn.request) or request or (http and http.request)
@@ -68,89 +63,37 @@ local function rawRequest(method, url, body)
     return r
 end
 
--- POST cc messages to specific index or all
-local function httpPostCC(data)
+-- POST to webhook
+local function httpPost(data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
-    if POST_TO_INDEX > 0 and POST_TO_INDEX <= #HOOK_URLS then
-        -- post to ONE specific webhook
-        local i = POST_TO_INDEX
-        local now = tick()
-        if now < postCooldowns[i] then
-            return false, "cooldown (" .. math.ceil(postCooldowns[i] - now) .. "s)"
-        end
-        local r, err = rawRequest("POST", HOOK_URLS[i], body)
-        if not r then return false, tostring(err) end
-        local code = r.StatusCode or 0
-        if code >= 200 and code < 300 then return true, r end
-        if code == 429 then postCooldowns[i] = tick() + 30 end
-        return false, "HTTP " .. tostring(code)
-    end
-    -- POST_TO_INDEX == 0: post to ALL
-    local anyOk = false
-    local lastErr = ""
-    for i, url in ipairs(HOOK_URLS) do
-        local now = tick()
-        if now < postCooldowns[i] then
-            lastErr = "url" .. i .. " cooldown"
-            continue
-        end
-        local r, err = rawRequest("POST", url, body)
-        if not r then
-            lastErr = tostring(err)
-            continue
-        end
-        local code = r.StatusCode or 0
-        if code >= 200 and code < 300 then
-            anyOk = true
-        elseif code == 429 then
-            postCooldowns[i] = tick() + 30
-            lastErr = "url" .. i .. " rate limited"
-        else
-            lastErr = "url" .. i .. " HTTP " .. code
-        end
-    end
-    return anyOk, lastErr
-end
-
--- POST to ONE url round-robin (for chat relay - spreads load)
-local function httpPostOne(data)
-    local body = jEncode(data)
-    if not body then return false, "encode failed" end
-    for attempt = 1, #HOOK_URLS do
-        local idx = ((postRRIndex - 1) % #HOOK_URLS) + 1
-        postRRIndex = postRRIndex + 1
-        local url = HOOK_URLS[idx]
-        local now = tick()
-        if now < postCooldowns[idx] then continue end
-        local r, err = rawRequest("POST", url, body)
-        if not r then continue end
-        local code = r.StatusCode or 0
-        if code >= 200 and code < 300 then
-            return true
-        end
-        if code == 429 then
-            postCooldowns[idx] = tick() + 30
-        end
-    end
-    return false, "all urls rate limited"
-end
-
--- GET from one url (per-URL cooldown)
-local function httpGetOne(idx)
     local now = tick()
-    if now < getCooldowns[idx] then return nil end
-    local url = HOOK_URLS[idx]
-    local r, err = rawRequest("GET", url, nil)
+    if now < postCooldown then
+        return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
+    end
+    local r, err = rawRequest("POST", POST_URL, body)
+    if not r then return false, tostring(err) end
+    local code = r.StatusCode or 0
+    if code >= 200 and code < 300 then return true end
+    if code == 429 then postCooldown = tick() + 30 end
+    return false, "HTTP " .. tostring(code)
+end
+
+-- GET stored requests from webhook
+local function httpGet()
+    local now = tick()
+    if now < getCooldown then return nil end
+    local r, err = rawRequest("GET", GET_URL, nil)
     if not r then return nil end
     if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
         return r.Body
     end
     if r.StatusCode == 429 then
-        getCooldowns[idx] = tick() + 30
+        getCooldown = tick() + 30
     end
     return nil
 end
+
 -- ===== CHAT: SAY IN GAME =====
 local function sayChat(text)
     if #text > MAX_CHAT_LEN then
@@ -170,7 +113,6 @@ local function sayChat(text)
 end
 
 -- ===== CHAT HOOK (shared) =====
--- Returns a function that hooks TextChatService and calls onMsg(from, text)
 local function hookChat(onMsg)
     local ok = pcall(function()
         TextChatService.MessageReceived:Connect(function(msg)
@@ -201,17 +143,18 @@ local function hookChat(onMsg)
 end
 
 -- ===== PROCESS ENTRIES FROM WEBHOOK =====
--- Handles both t="cc" (cross-connect) and t="cr" (chat relay) messages
 local function processEntries(entries, addMsg, isSender, wantCC, wantCR)
     local lastCC = nil
     for _, entry in ipairs(entries) do
-        local eid = tostring(entry.id or entry._id or "")
+        -- webhook.site uses "uuid" field, not "id"
+        local eid = tostring(entry.uuid or entry.id or entry._id or "")
         if #eid == 0 then eid = tostring(entry) end
         if not seenIds[eid] then
             local content = entry.content or entry.body or entry.Body
             if content then
-                local msgData = jDecode(content)
-                if msgData then
+                -- content might already be a table (some services) or a JSON string
+                local msgData = type(content) == "string" and jDecode(content) or content
+                if msgData and type(msgData) == "table" then
                     if msgData.t == "cc" and msgData.m then
                         if wantCC then
                             seenIds[eid] = true
@@ -222,7 +165,7 @@ local function processEntries(entries, addMsg, isSender, wantCC, wantCR)
                                 local chatMsg = fromName .. " said: " .. message
                                 local ok = sayChat(chatMsg)
                                 if ok then
-                                    addMsg("[Said] " .. chatMsg, C_GREEN)
+                                    addMsg("[Said in chat] " .. chatMsg, C_GREEN)
                                 else
                                     addMsg("[Error] Could not say in chat", C_RED)
                                 end
@@ -243,21 +186,6 @@ local function processEntries(entries, addMsg, isSender, wantCC, wantCR)
     return lastCC
 end
 
--- ===== PARSE WEBHOOK RESPONSE (flexible) =====
-local function parseEntries(data)
-    -- hook0 / webhooksite / discord-style / bare array
-    if type(data.data) == "table" then return data.data end
-    if type(data.messages) == "table" then return data.messages end
-    if type(data.results) == "table" then return data.results end
-    if type(data.entries) == "table" then return data.entries end
-    if type(data.items) == "table" then return data.items end
-    if type(data) == "table" and type(data[1]) == "table" then return data end
-    -- single entry wrapped (not an array)
-    if type(data) == "table" and (data.id or data.content or data.body) then
-        return { data }
-    end
-    return nil
-end
 -- ===== GUI HELPERS =====
 local function mk(cls, props, parent)
     local i = Instance.new(cls)
@@ -368,7 +296,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "Hook0 webhook loaded",
+    Text = "webhook.site  |  token: " .. HOOK_TOKEN:sub(1, 8) .. "...",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
@@ -451,7 +379,7 @@ local function initMessager()
         if not text or #text == 0 then return end
         inputBox.Text = ""
         addMsg("You: " .. text, C_TEXT)
-        local ok, err = httpPostCC({
+        local ok, err = httpPost({
             t = "cc", n = plr.DisplayName, m = text, ts = tick()
         })
         if ok then
@@ -464,7 +392,7 @@ local function initMessager()
     sendBtn.MouseButton1Click:Connect(send)
     inputBox.FocusLost:Connect(function(enter) if enter then send() end end)
 
-    -- ===== CHAT LOGGER: local + relay from Sender =====
+    -- ===== CHAT LOGGER =====
     local chatHooked = hookChat(function(from, text)
         addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
     end)
@@ -474,7 +402,7 @@ local function initMessager()
         addMsg("[System] Chat logger failed", C_RED)
     end
 
-    -- ===== POLL: receive cc messages + chat relay from Sender =====
+    -- ===== POLL: receive chat relay (cr) from Sender =====
     running = true
     local pollCount = 0
     task.spawn(function()
@@ -482,41 +410,40 @@ local function initMessager()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            -- poll all URLs, collect entries
-            for i = 1, #HOOK_URLS do
-                local response = httpGetOne(i)
-                if not response then
-                    if debugMode then
-                        addMsg("[Debug] url" .. i .. ": no response (cooldown?)", C_VDIM)
-                    end
-                    continue
-                end
-                local data = jDecode(response)
-                if not data then
-                    if debugMode then
-                        addMsg("[Debug] url" ..i .. " raw: " .. tostring(response):sub(1, 120), C_VDIM)
-                    end
-                    continue
-                end
+            local response = httpGet()
+            if not response then
                 if debugMode then
-                    local keys = {}
-                    for k, v in pairs(data) do
-                        table.insert(keys, tostring(k) .. "=" .. type(v))
-                    end
-                    addMsg("[Debug] url" ..i .. " keys: " .. table.concat(keys, ", "), C_VDIM)
+                    addMsg("[Debug] GET: no response", C_VDIM)
                 end
-                local entries = parseEntries(data)
-                if not entries then
-                    if debugMode then
-                        addMsg("[Debug] url" ..i .. " parseEntries returned nil", C_VDIM)
-                    end
-                    continue
-                end
-                if debugMode then
-                    addMsg("[Debug] url" ..i .. " found " .. #entries .. " entries", C_VDIM)
-                end
-                processEntries(entries, addMsg, false, false, true)
+                continue
             end
+            local data = jDecode(response)
+            if not data then
+                if debugMode then
+                    addMsg("[Debug] GET raw: " .. tostring(response):sub(1, 120), C_VDIM)
+                end
+                continue
+            end
+            if debugMode then
+                local keys = {}
+                for k, v in pairs(data) do
+                    table.insert(keys, tostring(k) .. "=" .. type(v))
+                end
+                addMsg("[Debug] GET keys: " .. table.concat(keys, ", "), C_VDIM)
+            end
+            -- webhook.site returns { data: [...], total: N, ... }
+            local entries = data.data
+            if type(entries) ~= "table" then
+                if debugMode then
+                    addMsg("[Debug] no data[] array in response", C_VDIM)
+                end
+                continue
+            end
+            if debugMode then
+                addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
+            end
+            -- Messager wants chat relay (cr) messages from Sender
+            processEntries(entries, addMsg, false, false, true)
         end
     end)
 end
@@ -583,11 +510,11 @@ local function initSender()
     addMsg("[System] Connected as Sender", C_GREEN)
     addMsg("[System] Waiting for messages...", C_DIM)
 
-    -- ===== CHAT LOGGER + RELAY: log locally AND send to Messager =====
+    -- ===== CHAT LOGGER + RELAY =====
     local chatHooked = hookChat(function(from, text)
         addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
-        -- relay this chat message to the Messager via webhook
-        httpPostOne({
+        -- relay server chat to Messager via webhook
+        httpPost({
             t = "cr", n = from, m = text, ts = tick()
         })
     end)
@@ -597,7 +524,7 @@ local function initSender()
         addMsg("[System] Chat logger failed", C_RED)
     end
 
-    -- ===== POLL: receive cc messages from Messager =====
+    -- ===== POLL: receive cc messages from Messager & SAY THEM IN CHAT =====
     running = true
     local pollCount = 0
     task.spawn(function()
@@ -605,42 +532,41 @@ local function initSender()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            for i = 1, #HOOK_URLS do
-                local response = httpGetOne(i)
-                if not response then
-                    if debugMode then
-                        addMsg("[Debug] url" .. i .. ": no response (cooldown?)", C_VDIM)
-                    end
-                    continue
-                end
-                local data = jDecode(response)
-                if not data then
-                    if debugMode then
-                        addMsg("[Debug] url" ..i .. " raw: " .. tostring(response):sub(1, 120), C_VDIM)
-                    end
-                    continue
-                end
+            local response = httpGet()
+            if not response then
                 if debugMode then
-                    local keys = {}
-                    for k, v in pairs(data) do
-                        table.insert(keys, tostring(k) .. "=" .. type(v))
-                    end
-                    addMsg("[Debug] url" ..i .. " keys: " .. table.concat(keys, ", "), C_VDIM)
+                    addMsg("[Debug] GET: no response", C_VDIM)
                 end
-                local entries = parseEntries(data)
-                if not entries then
-                    if debugMode then
-                        addMsg("[Debug] url" ..i .. " parseEntries returned nil", C_VDIM)
-                    end
-                    continue
-                end
+                continue
+            end
+            local data = jDecode(response)
+            if not data then
                 if debugMode then
-                    addMsg("[Debug] url" ..i .. " found " .. #entries .. " entries", C_VDIM)
+                    addMsg("[Debug] GET raw: " .. tostring(response):sub(1, 120), C_VDIM)
                 end
-                local lastFrom = processEntries(entries, addMsg, true, true, false)
-                if lastFrom then
-                    statusLabel.Text = "Last: " .. lastFrom .. " (" .. os.date("%H:%M:%S") .. ")"
+                continue
+            end
+            if debugMode then
+                local keys = {}
+                for k, v in pairs(data) do
+                    table.insert(keys, tostring(k) .. "=" .. type(v))
                 end
+                addMsg("[Debug] GET keys: " .. table.concat(keys, ", "), C_VDIM)
+            end
+            local entries = data.data
+            if type(entries) ~= "table" then
+                if debugMode then
+                    addMsg("[Debug] no data[] array in response", C_VDIM)
+                end
+                continue
+            end
+            if debugMode then
+                addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
+            end
+            -- Sender wants cc messages -> shows in log + says in chat
+            local lastFrom = processEntries(entries, addMsg, true, true, false)
+            if lastFrom then
+                statusLabel.Text = "Last: " .. lastFrom .. " (" .. os.date("%H:%M:%S") .. ")"
             end
         end
     end)
