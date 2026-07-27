@@ -20,6 +20,11 @@ local running = false
 local lastId = 0
 
 -- ===== HTTP UTILS =====
+-- Use executor-compatible HTTP (syn.request / request / http.request)
+-- Falls back to HttpService only if none available
+
+local httpFn = syn and syn.request or request or (http and http.request)
+
 local function jEncode(t)
     local ok, r = pcall(HttpService.JSONEncode, HttpService, t)
     return ok and r or nil
@@ -33,6 +38,17 @@ end
 local function httpPost(url, data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
+    if httpFn then
+        local ok, r = pcall(httpFn, {
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = body
+        })
+        if ok then return true, r end
+        return false, r
+    end
+    -- fallback (may be blacklisted on some executors)
     local ok, r = pcall(function()
         return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
@@ -40,6 +56,11 @@ local function httpPost(url, data)
 end
 
 local function httpGet(url)
+    if httpFn then
+        local ok, r = pcall(httpFn, { Url = url, Method = "GET" })
+        if ok and r and r.Body then return r.Body end
+        return nil
+    end
     local ok, r = pcall(HttpService.GetAsync, HttpService, url)
     return ok and r or nil
 end
