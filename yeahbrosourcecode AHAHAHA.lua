@@ -308,6 +308,26 @@ local function initMessager()
 
     sendBtn.MouseButton1Click:Connect(send)
     inputBox.FocusLost:Connect(function(enter) if enter then send() end end)
+
+    -- ===== CHAT LOGGER: show server messages in messager log =====
+    local chatEvents = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    if chatEvents then
+        local onNewMsg = chatEvents:FindFirstChild("OnNewMessage")
+        if onNewMsg then
+            onNewMsg.OnClientEvent:Connect(function(msgData)
+                local from = msgData.FromSpeaker or msgData.FromDisplayName or "???"
+                local text = msgData.Message or ""
+                if text ~= "" then
+                    addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
+                end
+            end)
+            addMsg("[System] Chat logger active", C_GREEN)
+        else
+            addMsg("[System] Could not find OnNewMessage", C_RED)
+        end
+    else
+        addMsg("[System] Could not find chat events", C_RED)
+    end
 end
 
 -- ========================================
@@ -372,6 +392,7 @@ local function initSender()
     addMsg("[System] Connected as Sender", C_GREEN)
     addMsg("[System] Waiting for messages...", C_DIM)
 
+    local firstPoll = true
     running = true
     task.spawn(function()
         while running do
@@ -379,25 +400,59 @@ local function initSender()
             local response = httpGet(hookUrl)
             if not response then continue end
             local data = jDecode(response)
-            if not data or type(data.data) ~= "table" then continue end
-            local entries = data.data
+            if not data then
+                if firstPoll then
+                    addMsg("[Debug] GET raw: " .. tostring(response):sub(1, 80), C_VDIM)
+                    addMsg("[Error] Could not parse response", C_RED)
+                    firstPoll = false
+                end
+                continue
+            end
+            -- try multiple response formats
+            local entries = nil
+            if type(data.data) == "table" then
+                entries = data.data
+            elseif type(data.messages) == "table" then
+                entries = data.messages
+            elseif type(data.results) == "table" then
+                entries = data.results
+            elseif type(data) == "table" and type(data[1]) == "table" then
+                entries = data -- response is a direct array
+            end
+            if not entries then
+                if firstPoll then
+                    -- dump keys so we can see the format
+                    local keys = {}
+                    for k, v in pairs(data) do
+                        table.insert(keys, tostring(k) .. "=" .. type(v))
+                    end
+                    addMsg("[Debug] Response keys: " .. table.concat(keys, ", "), C_VDIM)
+                    firstPoll = false
+                end
+                continue
+            end
+            firstPoll = false
             for _, entry in ipairs(entries) do
-                local eid = tostring(entry.id)
-                if not seenIds[eid] and entry.content then
-                    local msgData = jDecode(entry.content)
-                    if msgData and msgData.t == "cc" and msgData.m then
-                        seenIds[eid] = true
-                        local fromName = msgData.n or "Unknown"
-                        local message = msgData.m
-                        addMsg(fromName .. ": " .. message, C_TEXT)
-                        local chatMsg = fromName .. " said: " .. message
-                        local ok = sayChat(chatMsg)
-                        if ok then
-                            addMsg("[Said] " .. chatMsg, C_GREEN)
-                        else
-                            addMsg("[Error] Could not say in chat", C_RED)
+                local eid = tostring(entry.id or entry._id or "")
+                if #eid == 0 then eid = tostring(entry) end
+                if not seenIds[eid] then
+                    local content = entry.content or entry.body or entry.Body
+                    if content then
+                        local msgData = jDecode(content)
+                        if msgData and msgData.t == "cc" and msgData.m then
+                            seenIds[eid] = true
+                            local fromName = msgData.n or "Unknown"
+                            local message = msgData.m
+                            addMsg(fromName .. ": " .. message, C_TEXT)
+                            local chatMsg = fromName .. " said: " .. message
+                            local ok = sayChat(chatMsg)
+                            if ok then
+                                addMsg("[Said] " .. chatMsg, C_GREEN)
+                            else
+                                addMsg("[Error] Could not say in chat", C_RED)
+                            end
+                            statusLabel.Text = "Last: " .. fromName .. " (" .. os.date("%H:%M:%S") .. ")"
                         end
-                        statusLabel.Text = "Last: " .. fromName .. " (" .. os.date("%H:%M:%S") .. ")"
                     end
                 end
             end
