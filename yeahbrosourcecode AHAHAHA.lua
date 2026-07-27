@@ -17,7 +17,7 @@ local MAX_CHAT_LEN = 200
 local role = nil
 local hookUrl = HOOK_URL
 local running = false
-local lastId = 0
+local seenIds = {}
 
 -- ===== HTTP UTILS =====
 -- Use executor-compatible HTTP (syn.request / request / http.request)
@@ -45,7 +45,14 @@ local function httpPost(url, data)
             Headers = { ["Content-Type"] = "application/json" },
             Body = body
         })
-        if ok then return true, r end
+        if ok then
+            local code = r and r.StatusCode or 0
+            if code >= 200 and code < 300 then
+                return true, r
+            else
+                return false, "HTTP " .. tostring(code)
+            end
+        end
         return false, r
     end
     -- fallback (may be blacklisted on some executors)
@@ -58,7 +65,12 @@ end
 local function httpGet(url)
     if httpFn then
         local ok, r = pcall(httpFn, { Url = url, Method = "GET" })
-        if ok and r and r.Body then return r.Body end
+        if ok and r and r.Body then
+            local code = r.StatusCode or 0
+            if code >= 200 and code < 300 then
+                return r.Body
+            end
+        end
         return nil
     end
     local ok, r = pcall(HttpService.GetAsync, HttpService, url)
@@ -281,7 +293,9 @@ local function initMessager()
         local ok, err = httpPost(hookUrl, {
             t = "cc", n = plr.DisplayName, m = text, ts = tick()
         })
-        if not ok then
+        if ok then
+            addMsg("[Sent] Message delivered", C_GREEN)
+        else
             addMsg("[Error] Send failed: " .. tostring(err), C_RED)
         end
     end
@@ -361,15 +375,12 @@ local function initSender()
             local data = jDecode(response)
             if not data or type(data.data) ~= "table" then continue end
             local entries = data.data
-            table.sort(entries, function(a, b)
-                return (type(a.id) == "number" and a.id or 0) < (type(b.id) == "number" and b.id or 0)
-            end)
             for _, entry in ipairs(entries) do
-                local eid = type(entry.id) == "number" and entry.id or 0
-                if eid > lastId and entry.content then
+                local eid = tostring(entry.id)
+                if not seenIds[eid] and entry.content then
                     local msgData = jDecode(entry.content)
                     if msgData and msgData.t == "cc" and msgData.m then
-                        lastId = eid
+                        seenIds[eid] = true
                         local fromName = msgData.n or "Unknown"
                         local message = msgData.m
                         addMsg(fromName .. ": " .. message, C_TEXT)
