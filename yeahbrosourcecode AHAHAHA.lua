@@ -11,27 +11,37 @@ local TextChatService = game:GetService("TextChatService")
 local plr = Players.LocalPlayer
 
 -- [[[  CONFIG - EDIT THESE  ]]]
--- 
+--
 -- >> Seconds between each poll cycle
 local POLL_RATE = 10
 --
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Webhook token (the UUID from webhook.site)
---    POST:  https://webhook.site/{TOKEN}
---    GET:   https://webhook.site/token/{TOKEN}/requests?sorting=newest
-local HOOK_TOKEN = "cfce6b75-d231-4992-a569-ede9edcc3929"
+-- >> Max requests per token before rotating to next
+local MAX_CALLS_PER_TOKEN = 208
+--
+-- >> Webhook tokens (webhook.site)
+local HOOK_TOKENS = {
+    "d30256d0-cc04-4215-b8f2-102a9a8c5aa7",
+    "8511583e-16f8-49e6-972e-72e6188a4e9d",
+    "61624aef-c3e6-4882-87fc-2832d5d233bf",
+    "46a684c0-15a4-4978-8060-9bc77793cf64",
+    "43fdb018-9a9d-45b8-b766-613e763ce1c5",
+    "4aecda95-5289-4bd7-a404-449e57fb0a2c",
+}
 -- [[[  END CONFIG  ]]]
 
--- Derived URLs
-local POST_URL = "https://webhook.site/" .. HOOK_TOKEN
-local GET_URL  = "https://webhook.site/token/" .. HOOK_TOKEN .. "/requests?sorting=newest"
+-- ===== DERIVED URLs =====
+-- POST: https://webhook.site/{token}  (stores message)
+-- GET:  https://webhook.site/token/{token}/requests?sorting=newest  (retrieves messages)
 
 -- ===== STATE =====
 local role = nil
 local running = false
 local seenIds = {}
+local tokenCallCount = 0
+local currentTokenIdx = 1
 local postCooldown = 0
 local getCooldown = 0
 
@@ -63,7 +73,25 @@ local function rawRequest(method, url, body)
     return r
 end
 
--- POST to webhook
+-- Rotate to next token when call limit hit
+local function getNextToken()
+    if tokenCallCount >= MAX_CALLS_PER_TOKEN then
+        tokenCallCount = 0
+        currentTokenIdx = (currentTokenIdx % #HOOK_TOKENS) + 1
+    end
+    tokenCallCount = tokenCallCount + 1
+    return HOOK_TOKENS[currentTokenIdx]
+end
+
+local function getPostUrl(token)
+    return "https://webhook.site/" .. token
+end
+
+local function getGetUrl(token)
+    return "https://webhook.site/token/" .. token .. "/requests?sorting=newest"
+end
+
+-- POST to current token (with rotation)
 local function httpPost(data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
@@ -71,7 +99,8 @@ local function httpPost(data)
     if now < postCooldown then
         return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
     end
-    local r, err = rawRequest("POST", POST_URL, body)
+    local token = getNextToken()
+    local r, err = rawRequest("POST", getPostUrl(token), body)
     if not r then return false, tostring(err) end
     local code = r.StatusCode or 0
     if code >= 200 and code < 300 then return true end
@@ -79,37 +108,54 @@ local function httpPost(data)
     return false, "HTTP " .. tostring(code)
 end
 
--- GET stored requests from webhook
-local function httpGet()
+-- GET from ALL tokens (check each for new messages)
+local function httpGetAll()
     local now = tick()
     if now < getCooldown then return nil end
-    local r, err = rawRequest("GET", GET_URL, nil)
-    if not r then return nil end
-    if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
-        return r.Body
+    local allEntries = {}
+    for i, token in ipairs(HOOK_TOKENS) do
+        local r, err = rawRequest("GET", getGetUrl(token), nil)
+        if r and r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
+            local data = jDecode(r.Body)
+            if data and type(data.data) == "table" then
+                for _, entry in ipairs(data.data) do
+                    table.insert(allEntries, entry)
+                end
+            end
+        end
+        if r and r.StatusCode == 429 then
+            getCooldown = tick() + 30
+            break
+        end
     end
-    if r.StatusCode == 429 then
-        getCooldown = tick() + 30
-    end
+    if #allEntries > 0 then return allEntries end
     return nil
 end
 
--- ===== CHAT: SAY IN GAME =====
+-- ===== CHAT: SAY IN GAME (REAL METHOD - same as IY/Arc's spam) =====
+local isLegacyChat = not pcall(function()
+    return TextChatService:FindFirstChild("TextChannels")
+end)
+
 local function sayChat(text)
     if #text > MAX_CHAT_LEN then
         text = text:sub(1, MAX_CHAT_LEN - 3) .. "..."
     end
-    local ce = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-    if ce and ce:FindFirstChild("SayMessageRequest") then
-        ce.SayMessageRequest:FireServer(text, "All")
-        return true
-    end
-    local head = plr.Character and plr.Character:FindFirstChild("Head")
-    if head then
-        game:GetService("Chat"):Chat(head, text)
-        return true
-    end
-    return false
+    local ok, err = pcall(function()
+        if isLegacyChat then
+            local ce = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+            if ce and ce:FindFirstChild("SayMessageRequest") then
+                ce.SayMessageRequest:FireServer(text, "All")
+            end
+        else
+            local channel = TextChatService:FindFirstChild("TextChannels")
+                and TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+            if channel then
+                channel:SendAsync(text)
+            end
+        end
+    end)
+    return ok
 end
 
 -- ===== CHAT HOOK (shared) =====
@@ -146,13 +192,11 @@ end
 local function processEntries(entries, addMsg, isSender, wantCC, wantCR)
     local lastCC = nil
     for _, entry in ipairs(entries) do
-        -- webhook.site uses "uuid" field, not "id"
         local eid = tostring(entry.uuid or entry.id or entry._id or "")
         if #eid == 0 then eid = tostring(entry) end
         if not seenIds[eid] then
             local content = entry.content or entry.body or entry.Body
             if content then
-                -- content might already be a table (some services) or a JSON string
                 local msgData = type(content) == "string" and jDecode(content) or content
                 if msgData and type(msgData) == "table" then
                     if msgData.t == "cc" and msgData.m then
@@ -296,7 +340,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "webhook.site  |  token: " .. HOOK_TOKEN:sub(1, 8) .. "...",
+    Text = #HOOK_TOKENS .. " webhook.site tokens (auto-rotate @ " .. MAX_CALLS_PER_TOKEN .. " calls)",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
@@ -410,39 +454,16 @@ local function initMessager()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            local response = httpGet()
-            if not response then
+            local entries = httpGetAll()
+            if not entries then
                 if debugMode then
-                    addMsg("[Debug] GET: no response", C_VDIM)
-                end
-                continue
-            end
-            local data = jDecode(response)
-            if not data then
-                if debugMode then
-                    addMsg("[Debug] GET raw: " .. tostring(response):sub(1, 120), C_VDIM)
-                end
-                continue
-            end
-            if debugMode then
-                local keys = {}
-                for k, v in pairs(data) do
-                    table.insert(keys, tostring(k) .. "=" .. type(v))
-                end
-                addMsg("[Debug] GET keys: " .. table.concat(keys, ", "), C_VDIM)
-            end
-            -- webhook.site returns { data: [...], total: N, ... }
-            local entries = data.data
-            if type(entries) ~= "table" then
-                if debugMode then
-                    addMsg("[Debug] no data[] array in response", C_VDIM)
+                    addMsg("[Debug] GET: no new entries", C_VDIM)
                 end
                 continue
             end
             if debugMode then
                 addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
             end
-            -- Messager wants chat relay (cr) messages from Sender
             processEntries(entries, addMsg, false, false, true)
         end
     end)
@@ -513,7 +534,6 @@ local function initSender()
     -- ===== CHAT LOGGER + RELAY =====
     local chatHooked = hookChat(function(from, text)
         addMsg("[Chat] " .. from .. ": " .. text, C_DIM)
-        -- relay server chat to Messager via webhook
         httpPost({
             t = "cr", n = from, m = text, ts = tick()
         })
@@ -524,7 +544,7 @@ local function initSender()
         addMsg("[System] Chat logger failed", C_RED)
     end
 
-    -- ===== POLL: receive cc messages from Messager & SAY THEM IN CHAT =====
+    -- ===== POLL: receive cc messages from Messager & SAY IN CHAT =====
     running = true
     local pollCount = 0
     task.spawn(function()
@@ -532,38 +552,16 @@ local function initSender()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            local response = httpGet()
-            if not response then
+            local entries = httpGetAll()
+            if not entries then
                 if debugMode then
-                    addMsg("[Debug] GET: no response", C_VDIM)
-                end
-                continue
-            end
-            local data = jDecode(response)
-            if not data then
-                if debugMode then
-                    addMsg("[Debug] GET raw: " .. tostring(response):sub(1, 120), C_VDIM)
-                end
-                continue
-            end
-            if debugMode then
-                local keys = {}
-                for k, v in pairs(data) do
-                    table.insert(keys, tostring(k) .. "=" .. type(v))
-                end
-                addMsg("[Debug] GET keys: " .. table.concat(keys, ", "), C_VDIM)
-            end
-            local entries = data.data
-            if type(entries) ~= "table" then
-                if debugMode then
-                    addMsg("[Debug] no data[] array in response", C_VDIM)
+                    addMsg("[Debug] GET: no new entries", C_VDIM)
                 end
                 continue
             end
             if debugMode then
                 addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
             end
-            -- Sender wants cc messages -> shows in log + says in chat
             local lastFrom = processEntries(entries, addMsg, true, true, false)
             if lastFrom then
                 statusLabel.Text = "Last: " .. lastFrom .. " (" .. os.date("%H:%M:%S") .. ")"
