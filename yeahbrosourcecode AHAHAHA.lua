@@ -190,7 +190,8 @@ local function initMessager()
         BackgroundColor3 = C_BG, BorderSizePixel = 0,
         Active = true, Draggable = true
     }, gui)
-    crnr(main); strk(main, C_ORANGE)
+    mk("UICorner", {CornerRadius = UDim.new(0, 8)}, main)
+    mk("UIStroke", {Color = C_ORANGE, Thickness = 1.5}, main)
 
     mk("Frame", {
         Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = C_DARK,
@@ -279,7 +280,8 @@ local function initSender()
         BackgroundColor3 = C_BG, BorderSizePixel = 0,
         Active = true, Draggable = true
     }, gui)
-    crnr(main); strk(main, C_ORANGE)
+    mk("UICorner", {CornerRadius = UDim.new(0, 8)}, main)
+    mk("UIStroke", {Color = C_ORANGE, Thickness = 1.5}, main)
 
     mk("Frame", {
         Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = C_DARK,
