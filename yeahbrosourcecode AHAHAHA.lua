@@ -9,8 +9,8 @@ local HttpService = game:GetService("HttpService")
 local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
-local HOOK_URL = "https://webhook.site/1e099fac-a08b-4769-8b01-92f48642db72"
-local POLL_RATE = 10
+local HOOK_URL = "https://webhooksite.net/b6f17c89-b0b1-49de-9e94-c34dccc0f4aa"
+local POLL_RATE = 15
 local MAX_CHAT_LEN = 200
 
 -- ===== STATE =====
@@ -211,7 +211,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "Webhook: 1e099fac...db72 (built-in)",
+    Text = "Webhook: b6f17c89...0f4aa (built-in)",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
