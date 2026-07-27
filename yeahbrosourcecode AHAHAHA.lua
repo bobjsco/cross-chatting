@@ -2,6 +2,7 @@
 -- Connects Messager and Sender via HTTP relay (webhook.site)
 -- Messager types in custom GUI -> Sender says it in game chat
 
+local POLL_RATE = 15
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
