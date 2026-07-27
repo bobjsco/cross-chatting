@@ -10,7 +10,7 @@ local plr = Players.LocalPlayer
 
 -- ===== CONFIG =====
 local HOOK_URL = "https://webhook.site/1e099fac-a08b-4769-8b01-92f48642db72"
-local POLL_RATE = 0.5
+local POLL_RATE = 3
 local MAX_CHAT_LEN = 200
 
 -- ===== STATE =====
@@ -23,7 +23,26 @@ local seenIds = {}
 -- Use executor-compatible HTTP (syn.request / request / http.request)
 -- Falls back to HttpService only if none available
 
-local httpFn = syn and syn.request or request or (http and http.request)
+local httpFn = (syn and syn.request) or request or (http and http.request)
+local httpLower = not httpFn and false -- some executors use lowercase keys
+
+-- Detect which key style the executor wants
+local function detectHttpStyle()
+    if not httpFn then return nil end
+    local ok, r = pcall(httpFn, {
+        Url = "https://httpbin.org/get",
+        Method = "GET"
+    })
+    if ok and r and r.StatusCode then return "Pascal" end
+    -- retry with lowercase
+    ok, r = pcall(httpFn, {
+        url = "https://httpbin.org/get",
+        method = "GET"
+    })
+    if ok and r and r.StatusCode then return "camel" end
+    return "Pascal" -- default guess
+end
+local httpStyle = "Pascal" -- skip auto-detect to avoid extra requests
 
 local function jEncode(t)
     local ok, r = pcall(HttpService.JSONEncode, HttpService, t)
@@ -39,12 +58,21 @@ local function httpPost(url, data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
     if httpFn then
-        local ok, r = pcall(httpFn, {
-            Url = url,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = body
-        })
+        local req
+        if httpStyle == "camel" then
+            req = {
+                url = url, method = "POST",
+                headers = { ["Content-Type"] = "application/json" },
+                body = body
+            }
+        else
+            req = {
+                Url = url, Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = body
+            }
+        end
+        local ok, r = pcall(httpFn, req)
         if ok then
             local code = r and r.StatusCode or 0
             if code >= 200 and code < 300 then
@@ -53,9 +81,9 @@ local function httpPost(url, data)
                 return false, "HTTP " .. tostring(code)
             end
         end
-        return false, r
+        return false, tostring(r)
     end
-    -- fallback (may be blacklisted on some executors)
+    -- fallback
     local ok, r = pcall(function()
         return HttpService:PostAsync(url, body, Enum.HttpContentType.ApplicationJson)
     end)
@@ -64,7 +92,13 @@ end
 
 local function httpGet(url)
     if httpFn then
-        local ok, r = pcall(httpFn, { Url = url, Method = "GET" })
+        local req
+        if httpStyle == "camel" then
+            req = { url = url, method = "GET" }
+        else
+            req = { Url = url, Method = "GET" }
+        end
+        local ok, r = pcall(httpFn, req)
         if ok and r and r.Body then
             local code = r.StatusCode or 0
             if code >= 200 and code < 300 then
