@@ -322,7 +322,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = HOOK_URL:sub(1, 50) .. (HOOK_URL:len() > 50 and "..." or ""),
+    Text = "Webhook connected",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
