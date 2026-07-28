@@ -18,10 +18,8 @@ local POLL_RATE = 10
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Your webhook.site token (paste a new one from webhook.site when needed)
-local HOOK_TOKEN = "d30256d0-cc04-4215-b8f2-102a9a8c5aa7"
-local POST_URL = "https://webhook.site/" .. HOOK_TOKEN
-local GET_URL  = "https://webhook.site/token/" .. HOOK_TOKEN .. "/requests?sorting=newest"
+-- >> Your webhook URL (swap this when needed)
+local HOOK_URL = "https://play.hook0.com/in/c_9EVZFmPNqnVuL41MsgEUVH2184u/"
 -- [[[  END CONFIG  ]]]
 
 -- ===== STATE =====
