@@ -19,7 +19,7 @@ local POLL_RATE = 10
 local MAX_CHAT_LEN = 200
 --
 -- >> Your webhook URL (swap this when needed)
-local HOOK_URL = "https://play.hook0.com/in/c_Ak67W2CtawR09Ix96tK8TNzrxbJ/
+local HOOK_URL = "https://play.hook0.com/in/c_Ak67W2CtawR09Ix96tK8TNzrxbJ/"
 -- [[[  END CONFIG  ]]]
 
 -- ===== STATE =====
