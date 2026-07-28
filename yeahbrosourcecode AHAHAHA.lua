@@ -18,30 +18,18 @@ local POLL_RATE = 10
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Max requests per token before rotating to next
-local MAX_CALLS_PER_TOKEN = 208
---
--- >> Webhook tokens (webhook.site)
-local HOOK_TOKENS = {
-    "d30256d0-cc04-4215-b8f2-102a9a8c5aa7",
-    "8511583e-16f8-49e6-972e-72e6188a4e9d",
-    "61624aef-c3e6-4882-87fc-2832d5d233bf",
-    "46a684c0-15a4-4978-8060-9bc77793cf64",
-    "43fdb018-9a9d-45b8-b766-613e763ce1c5",
-    "4aecda95-5289-4bd7-a404-449e57fb0a2c",
-}
+-- >> Your webhook.site token (swap this when needed)
+local HOOK_TOKEN = "d30256d0-cc04-4215-b8f2-102a9a8c5aa7"
 -- [[[  END CONFIG  ]]]
 
 -- ===== DERIVED URLs =====
--- POST: https://webhook.site/{token}  (stores message)
--- GET:  https://webhook.site/token/{token}/requests?sorting=newest  (retrieves messages)
+local POST_URL = "https://webhook.site/" .. HOOK_TOKEN
+local GET_URL  = "https://webhook.site/token/" .. HOOK_TOKEN .. "/requests?sorting=newest"
 
 -- ===== STATE =====
 local role = nil
 local running = false
 local seenIds = {}
-local tokenCallCount = 0
-local currentTokenIdx = 1
 local postCooldown = 0
 local getCooldown = 0
 
@@ -73,25 +61,7 @@ local function rawRequest(method, url, body)
     return r
 end
 
--- Rotate to next token when call limit hit
-local function getNextToken()
-    if tokenCallCount >= MAX_CALLS_PER_TOKEN then
-        tokenCallCount = 0
-        currentTokenIdx = (currentTokenIdx % #HOOK_TOKENS) + 1
-    end
-    tokenCallCount = tokenCallCount + 1
-    return HOOK_TOKENS[currentTokenIdx]
-end
-
-local function getPostUrl(token)
-    return "https://webhook.site/" .. token
-end
-
-local function getGetUrl(token)
-    return "https://webhook.site/token/" .. token .. "/requests?sorting=newest"
-end
-
--- POST to current token (with rotation)
+-- POST to webhook
 local function httpPost(data)
     local body = jEncode(data)
     if not body then return false, "encode failed" end
@@ -99,8 +69,7 @@ local function httpPost(data)
     if now < postCooldown then
         return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
     end
-    local token = getNextToken()
-    local r, err = rawRequest("POST", getPostUrl(token), body)
+    local r, err = rawRequest("POST", POST_URL, body)
     if not r then return false, tostring(err) end
     local code = r.StatusCode or 0
     if code >= 200 and code < 300 then return true end
@@ -108,27 +77,21 @@ local function httpPost(data)
     return false, "HTTP " .. tostring(code)
 end
 
--- GET from ALL tokens (check each for new messages)
-local function httpGetAll()
+-- GET stored messages
+local function httpGet()
     local now = tick()
     if now < getCooldown then return nil end
-    local allEntries = {}
-    for i, token in ipairs(HOOK_TOKENS) do
-        local r, err = rawRequest("GET", getGetUrl(token), nil)
-        if r and r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
-            local data = jDecode(r.Body)
-            if data and type(data.data) == "table" then
-                for _, entry in ipairs(data.data) do
-                    table.insert(allEntries, entry)
-                end
-            end
-        end
-        if r and r.StatusCode == 429 then
-            getCooldown = tick() + 30
-            break
+    local r, err = rawRequest("GET", GET_URL, nil)
+    if not r then return nil end
+    if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
+        local data = jDecode(r.Body)
+        if data and type(data.data) == "table" then
+            return data.data
         end
     end
-    if #allEntries > 0 then return allEntries end
+    if r.StatusCode == 429 then
+        getCooldown = tick() + 30
+    end
     return nil
 end
 
@@ -340,7 +303,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = #HOOK_TOKENS .. " webhook.site tokens (auto-rotate @ " .. MAX_CALLS_PER_TOKEN .. " calls)",
+    Text = "webhook.site  |  " .. HOOK_TOKEN:sub(1, 8) .. "...",
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
@@ -454,15 +417,15 @@ local function initMessager()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            local entries = httpGetAll()
+            local entries = httpGet()
             if not entries then
                 if debugMode then
-                    addMsg("[Debug] GET: no new entries", C_VDIM)
+                    addMsg("[Debug] GET: no entries", C_VDIM)
                 end
                 continue
             end
             if debugMode then
-                addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
+                addMsg("[Debug] " .. #entries .. " entries", C_VDIM)
             end
             processEntries(entries, addMsg, false, false, true)
         end
@@ -552,15 +515,15 @@ local function initSender()
             task.wait(POLL_RATE)
             pollCount = pollCount + 1
             local debugMode = (pollCount <= 3)
-            local entries = httpGetAll()
+            local entries = httpGet()
             if not entries then
                 if debugMode then
-                    addMsg("[Debug] GET: no new entries", C_VDIM)
+                    addMsg("[Debug] GET: no entries", C_VDIM)
                 end
                 continue
             end
             if debugMode then
-                addMsg("[Debug] " .. #entries .. " entries retrieved", C_VDIM)
+                addMsg("[Debug] " .. #entries .. " entries", C_VDIM)
             end
             local lastFrom = processEntries(entries, addMsg, true, true, false)
             if lastFrom then
