@@ -18,13 +18,9 @@ local POLL_RATE = 10
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Your webhook.site token (swap this when needed)
-local HOOK_TOKEN = "d30256d0-cc04-4215-b8f2-102a9a8c5aa7"
+-- >> Your webhook URL (swap this when needed)
+local HOOK_URL = "https://play.hook0.com/in/c_o3XSLPJNrDp5ZwLiQ2EZiNAMUUz/"
 -- [[[  END CONFIG  ]]]
-
--- ===== DERIVED URLs =====
-local POST_URL = "https://webhook.site/" .. HOOK_TOKEN
-local GET_URL  = "https://webhook.site/token/" .. HOOK_TOKEN .. "/requests?sorting=newest"
 
 -- ===== STATE =====
 local role = nil
@@ -69,7 +65,7 @@ local function httpPost(data)
     if now < postCooldown then
         return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
     end
-    local r, err = rawRequest("POST", POST_URL, body)
+    local r, err = rawRequest("POST", HOOK_URL, body)
     if not r then return false, tostring(err) end
     local code = r.StatusCode or 0
     if code >= 200 and code < 300 then return true end
@@ -81,7 +77,7 @@ end
 local function httpGet()
     local now = tick()
     if now < getCooldown then return nil end
-    local r, err = rawRequest("GET", GET_URL, nil)
+    local r, err = rawRequest("GET", HOOK_URL, nil)
     if not r then return nil end
     if r.StatusCode and r.StatusCode >= 200 and r.StatusCode < 300 and r.Body then
         local data = jDecode(r.Body)
@@ -303,7 +299,7 @@ crnr(btnConn, 6); strk(btnConn, C_GREEN, 1)
 mk("TextLabel", {
     Size = UDim2.new(1, -24, 0, 30), Position = UDim2.new(0, 12, 0, 195),
     BackgroundTransparency = 1,
-    Text = "webhook.site  |  " .. HOOK_TOKEN:sub(1, 8) .. "...",
+    Text = HOOK_URL:sub(1, 50) .. (HOOK_URL:len() > 50 and "..." or ""),
     TextColor3 = C_VDIM, Font = Enum.Font.Gotham,
     TextSize = 9, TextXAlignment = Enum.TextXAlignment.Center, Parent = setup
 })
