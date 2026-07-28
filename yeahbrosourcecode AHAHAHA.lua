@@ -91,27 +91,18 @@ local function httpGet()
     return nil
 end
 
--- ===== CHAT: SAY IN GAME (REAL METHOD - same as IY/Arc's spam) =====
-local isLegacyChat = not pcall(function()
-    return TextChatService:FindFirstChild("TextChannels")
-end)
+-- ===== CHAT: SAY IN GAME (same method as IY/Arc's spam) =====
+local isLegacyChat = (TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService)
 
 local function sayChat(text)
     if #text > MAX_CHAT_LEN then
         text = text:sub(1, MAX_CHAT_LEN - 3) .. "..."
     end
-    local ok, err = pcall(function()
+    local ok = pcall(function()
         if isLegacyChat then
-            local ce = game.ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-            if ce and ce:FindFirstChild("SayMessageRequest") then
-                ce.SayMessageRequest:FireServer(text, "All")
-            end
+            game.ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(text, "All")
         else
-            local channel = TextChatService:FindFirstChild("TextChannels")
-                and TextChatService.TextChannels:FindFirstChild("RBXGeneral")
-            if channel then
-                channel:SendAsync(text)
-            end
+            TextChatService.TextChannels.RBXGeneral:SendAsync(text)
         end
     end)
     return ok
