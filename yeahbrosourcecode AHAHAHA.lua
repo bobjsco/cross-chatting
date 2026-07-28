@@ -18,8 +18,10 @@ local POLL_RATE = 10
 -- >> Max length of messages said in chat
 local MAX_CHAT_LEN = 200
 --
--- >> Your webhook URL (swap this when needed)
-local HOOK_URL = "https://play.hook0.com/in/c_9EVZFmPNqnVuL41MsgEUVH2184u/"
+-- >> Your webhook.site token (get a new one from webhook.site, paste here)
+local TOKEN = "d30256d0-cc04-4215-b8f2-102a9a8c5aa7"
+local POST_URL = "https://webhook.site/" .. TOKEN
+local GET_URL = "https://webhook.site/token/" .. TOKEN .. "/requests?sorting=newest"
 -- [[[  END CONFIG  ]]]
 
 -- ===== STATE =====
@@ -65,7 +67,7 @@ local function httpPost(data)
     if now < postCooldown then
         return false, "cooldown (" .. math.ceil(postCooldown - now) .. "s)"
     end
-    local r, err = rawRequest("POST", HOOK_URL, body)
+    local r, err = rawRequest("POST", POST_URL, body)
     if not r then return false, tostring(err) end
     local code = r.StatusCode or 0
     if code >= 200 and code < 300 then return true end
@@ -82,7 +84,7 @@ local function httpGet()
         lastGetDebug = "on cooldown"
         return nil
     end
-    local r, err = rawRequest("GET", HOOK_URL, nil)
+    local r, err = rawRequest("GET", GET_URL, nil)
     if not r then
         lastGetDebug = "request failed"
         return nil
